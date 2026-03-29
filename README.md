@@ -9,23 +9,31 @@
 
 ## 快速开始
 
-### 1. 安装依赖
+### 方式一：Docker 运行（推荐）
 
 ```bash
+# 启动服务
+docker-compose up -d
+
+# 访问系统
+http://localhost:8080
+
+# 停止服务
+docker-compose down
+```
+
+### 方式二：本地运行
+
+```bash
+# 安装依赖
 npm install
-```
 
-### 2. 启动服务器
-
-```bash
+# 启动服务器
 npm start
-# 或
-node server.js
+
+# 访问系统
+http://localhost:3000
 ```
-
-### 3. 访问系统
-
-打开浏览器访问：`http://localhost:3000`
 
 ## 使用说明
 
