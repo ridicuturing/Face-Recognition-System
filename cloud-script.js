@@ -1,9 +1,46 @@
 (async () => {
+  const API_BASE = '';
+  const CLOUD_TOKEN_KEY = 'cloud_token';
+
+  function getToken() {
+    return localStorage.getItem(CLOUD_TOKEN_KEY);
+  }
+
+  async function apiRequest(url, options = {}) {
+    const token = getToken();
+    const headers = {
+      'Content-Type': 'application/json',
+      ...options.headers
+    };
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+
+    const res = await fetch(API_BASE + url, {
+      ...options,
+      headers
+    });
+
+    if (res.status === 401 || res.status === 403) {
+      logout();
+      throw new Error('登录已过期');
+    }
+
+    return res;
+  }
+
+  function logout() {
+    localStorage.removeItem(CLOUD_TOKEN_KEY);
+    localStorage.removeItem('cloud_user');
+    location.href = 'index.html';
+  }
+
   const video = document.getElementById('video');
   const overlay = document.getElementById('overlay');
   const startBtn = document.getElementById('startBtn');
   const stopBtn = document.getElementById('stopBtn');
   const status = document.getElementById('status');
+  const syncStatus = document.getElementById('syncStatus');
   const fileInput = document.getElementById('fileInput');
   const dropArea = document.getElementById('drop-area');
   const nameInput = document.getElementById('nameInput');
@@ -16,37 +53,48 @@
   let currentStream = null;
   let recognitionInterval = null;
 
-  // Known faces storage structure in localStorage:
-  // { name: string, descriptors: Array<Array<number>>, thumbnail?: string }
-  // Loaded into a FaceMatcher as needed
   let faceMatcher = null;
   let labeledDescriptors = [];
 
-  // Load models from CDN
-  // Advanced feature flags
-  let advEnabled = true; // 默认开启高级功能
-  // age/gender and expressions availability
+  let advEnabled = true;
   let ageGenderLoaded = false;
   let expressionsLoaded = false;
-  let advancedUnavailable = false; // 默认可用
+  let advancedUnavailable = false;
+
+  const progressBar = document.getElementById('progressBar');
+  const progress = document.getElementById('progress');
+
+  function showProgress(percent, text) {
+    progressBar.classList.add('active');
+    progress.style.width = percent + '%';
+    if (text) status.textContent = text;
+  }
+
+  function hideProgress() {
+    progressBar.classList.remove('active');
+    progress.style.width = '0%';
+  }
+
+  function showSyncStatus(msg, type = 'normal') {
+    syncStatus.textContent = msg;
+    syncStatus.className = 'sync-status ' + type;
+  }
+
   async function loadModels(){
-    status.textContent = '加载模型中…';
-    // 支持多种模型路径，提升在不同网络环境下的成功率
+    showProgress(10, '加载模型中...');
     const modelPaths = [
-      // @vladmandic/face-api 的模型（完整包含 age_gender 和 expression 模型）
       'https://cdn.jsdelivr.net/npm/@vladmandic/face-api@1.7.5/model',
-      // 备用路径
       'https://justadudewhohacks.github.io/face-api.js/models'
     ];
     let loaded = false;
     for (const modelPath of modelPaths){
       try {
-        await Promise.all([
-          faceapi.nets.tinyFaceDetector.loadFromUri(modelPath),
-          faceapi.nets.faceLandmark68Net.loadFromUri(modelPath),
-          faceapi.nets.faceRecognitionNet.loadFromUri(modelPath)
-        ]);
-        // Age/Gender and Expressions can be loaded later on demand
+        showProgress(30, '加载检测模型...');
+        await faceapi.nets.tinyFaceDetector.loadFromUri(modelPath);
+        showProgress(50, '加载特征点模型...');
+        await faceapi.nets.faceLandmark68Net.loadFromUri(modelPath);
+        showProgress(70, '加载识别模型...');
+        await faceapi.nets.faceRecognitionNet.loadFromUri(modelPath);
         loaded = true;
         break;
       } catch (e) {
@@ -56,86 +104,93 @@
     if(!loaded){
       throw new Error('所有模型路径加载失败');
     }
-    }
+    showProgress(100, '模型加载完成');
+    setTimeout(hideProgress, 500);
+  }
 
-  function loadKnownFaces(){
-    const raw = localStorage.getItem('known_faces');
-    if(!raw) { faceMatcher = null; labeledDescriptors = []; return; }
-    const data = JSON.parse(raw);
-    // rebuild descriptors
-    labeledDescriptors = data.map(entry => {
-      const descriptors = entry.descriptors.map(d => new Float32Array(d));
-      return new faceapi.LabeledFaceDescriptors(entry.name, descriptors);
-    });
-    // ensure each entry has a stable id; persist if new ids were created
-    let needsSave = false;
-    data.forEach(entry => {
-      if(!entry.id){ entry.id = 'id_' + Math.random().toString(36).slice(2) + Date.now(); needsSave = true; }
-    });
-    if(needsSave){ localStorage.setItem('known_faces', JSON.stringify(data)); }
-    if(labeledDescriptors.length) {
-      faceMatcher = new faceapi.FaceMatcher(labeledDescriptors, 0.6);
-    } else {
-      faceMatcher = null;
+  async function loadKnownFaces(){
+    try {
+      const res = await apiRequest('/api/faces');
+      const data = await res.json();
+      
+      labeledDescriptors = data.map(entry => {
+        const descriptors = entry.descriptors.map(d => new Float32Array(d));
+        return new faceapi.LabeledFaceDescriptors(entry.name, descriptors);
+      });
+      
+      if(labeledDescriptors.length) {
+        faceMatcher = new faceapi.FaceMatcher(labeledDescriptors, 0.6);
+      } else {
+        faceMatcher = null;
+      }
+      showSyncStatus('已同步');
+    } catch (err) {
+      console.error('加载人脸数据失败:', err);
+      showSyncStatus('同步失败', 'error');
     }
   }
 
   function renderUploadedList(){
     uploadedList.innerHTML = '';
-    const raw = localStorage.getItem('known_faces');
-    if(!raw){ return; }
-    const data = JSON.parse(raw);
-    const formatDate = (iso) => {
-      if(!iso) return '—';
-      try {
-        return new Date(iso).toLocaleString();
-      } catch { return iso; }
-    };
-    data.forEach(item => {
-      const div = document.createElement('div');
-      div.className = 'record';
-      const img = document.createElement('img');
-      img.src = item.thumbnail || '';
-      const info = document.createElement('div');
-      info.style.display = 'flex'; info.style.flexDirection = 'column';
-      const nameEl = document.createElement('strong');
-      nameEl.textContent = item.name;
-      const meta = document.createElement('span');
-      meta.style.fontSize = '12px'; meta.style.color = '#555';
-      const count = (Array.isArray(item.descriptors) ? item.descriptors.length : 0);
-      meta.textContent = `描述数量: ${count}  | 最近更新: ${formatDate(item.updatedAt)}`;
-      info.appendChild(nameEl); info.appendChild(meta);
-      const actions = document.createElement('div'); actions.style.marginLeft = 'auto';
-      const delBtn = document.createElement('button');
-      delBtn.textContent = '删除';
-      delBtn.className = 'delete-btn';
-      delBtn.dataset.id = item.id;
-      delBtn.addEventListener('click', () => deleteFaceById(item.id));
-      actions.appendChild(delBtn);
-      div.appendChild(img); div.appendChild(info); div.appendChild(actions);
-      uploadedList.appendChild(div);
+    
+    apiRequest('/api/faces').then(res => res.json()).then(data => {
+      const formatDate = (iso) => {
+        if(!iso) return '—';
+        try {
+          return new Date(iso).toLocaleString();
+        } catch { return iso; }
+      };
+      
+      data.forEach(item => {
+        const div = document.createElement('div');
+        div.className = 'record';
+        const img = document.createElement('img');
+        img.src = item.thumbnail || '';
+        const info = document.createElement('div');
+        info.style.display = 'flex'; info.style.flexDirection = 'column';
+        const nameEl = document.createElement('strong');
+        nameEl.textContent = item.name;
+        const meta = document.createElement('span');
+        meta.style.fontSize = '12px'; meta.style.color = '#555';
+        const count = (Array.isArray(item.descriptors) ? item.descriptors.length : 0);
+        meta.textContent = `描述数量: ${count}  | 最近更新: ${formatDate(item.updatedAt)}`;
+        info.appendChild(nameEl); info.appendChild(meta);
+        const actions = document.createElement('div'); actions.style.marginLeft = 'auto';
+        const delBtn = document.createElement('button');
+        delBtn.textContent = '删除';
+        delBtn.className = 'delete-btn';
+        delBtn.dataset.id = item.id;
+        delBtn.addEventListener('click', () => deleteFaceById(item.id));
+        actions.appendChild(delBtn);
+        div.appendChild(img); div.appendChild(info); div.appendChild(actions);
+        uploadedList.appendChild(div);
+      });
     });
   }
 
-  function deleteFaceById(id){
+  async function deleteFaceById(id){
     if(!id) return;
-    const raw = localStorage.getItem('known_faces');
-    if(!raw) return;
-    let data = JSON.parse(raw);
-    const idx = data.findIndex(e => e.id === id);
-    if(idx >= 0){
-      const name = data[idx].name;
-      if(!confirm(`确定删除人脸 "${name}" 吗？`)) return;
-      data.splice(idx, 1);
-      localStorage.setItem('known_faces', JSON.stringify(data));
-      loadKnownFaces();
-      renderUploadedList();
-      // Optional user feedback: 简单日志
-      console.log(`已删除人脸: ${name}`);
+    if(!confirm('确定删除此人脸吗？')) return;
+    
+    try {
+      showSyncStatus('删除中...', 'syncing');
+      const res = await apiRequest('/api/faces/' + id, { method: 'DELETE' });
+      
+      if(res.ok) {
+        await loadKnownFaces();
+        renderUploadedList();
+        showSyncStatus('已同步');
+      } else {
+        const data = await res.json();
+        alert(data.error || '删除失败');
+        showSyncStatus('同步失败', 'error');
+      }
+    } catch (err) {
+      console.error('删除失败:', err);
+      showSyncStatus('同步失败', 'error');
     }
   }
 
-  // Handle image file selection (preview)
   function handleSelectedFile(file){
     if(!file) return;
     lastSelectedFileName = file.name;
@@ -151,9 +206,7 @@
     reader.readAsDataURL(file);
   }
 
-  // Save uploaded face descriptor with a name
   async function saveDescriptor(name, dataURL){
-    // create an image element to run face detection
     const img = new Image();
     img.src = dataURL;
     await new Promise(resolve => { img.onload = resolve; img.onerror = resolve; });
@@ -163,26 +216,36 @@
       return;
     }
     const descriptor = detections.descriptor;
-    // update storage: allow multiple descriptors per name
-    const raw = localStorage.getItem('known_faces');
-    let data = raw ? JSON.parse(raw) : [];
-    // find existing entry
-    const existing = data.find(e => e.name === name);
-    if(existing){
-      existing.descriptors.push(Array.from(descriptor));
-      existing.thumbnail = existing.thumbnail || lastSelectedDataURL;
-      existing.updatedAt = new Date().toISOString();
-    }else{
-      data.push({ name, descriptors: [Array.from(descriptor)], thumbnail: lastSelectedDataURL || '', updatedAt: new Date().toISOString() });
+    
+    try {
+      showSyncStatus('保存中...', 'syncing');
+      const res = await apiRequest('/api/faces', {
+        method: 'POST',
+        body: JSON.stringify({
+          name,
+          descriptors: [Array.from(descriptor)],
+          thumbnail: lastSelectedDataURL || ''
+        })
+      });
+      
+      const data = await res.json();
+      
+      if(res.ok) {
+        await loadKnownFaces();
+        renderUploadedList();
+        showSyncStatus('已同步');
+      } else {
+        alert(data.error || '保存失败');
+        showSyncStatus('同步失败', 'error');
+      }
+    } catch (err) {
+      console.error('保存失败:', err);
+      alert('保存失败: ' + err.message);
+      showSyncStatus('同步失败', 'error');
     }
-    localStorage.setItem('known_faces', JSON.stringify(data));
-    loadKnownFaces();
-    renderUploadedList();
   }
 
-  // Start recognition loop
   async function startRecognition(){
-    // 如果没有已知人脸数据，也不要阻塞识别，仍然为陌生人绘制红色框
     const hasKnownFaces = !!(faceMatcher && faceMatcher.labeledDescriptors && faceMatcher.labeledDescriptors.length > 0);
     if(!hasKnownFaces){
       status.textContent = '识别：暂无已知人脸数据，将对所有检测框显示为 Unknown';
@@ -195,15 +258,12 @@
       if(!w||!h){ return; }
       overlay.width = w; overlay.height = h;
     }
-    // ensure canvas size matches video
     video.addEventListener('loadedmetadata', () => {
       overlay.width = video.videoWidth; overlay.height = video.videoHeight;
     });
-    // frame loop
     const MATCH_THRESHOLD = 0.6;
     recognitionInterval = setInterval(async () => {
-      if(video.readyState !== 4) return; // HAVE_ENOUGH_DATA
-      // 构建检测链，根据是否启用年龄/性别和表情推断来扩展结果
+      if(video.readyState !== 4) return;
       let chain = faceapi.detectAllFaces(video, new faceapi.TinyFaceDetectorOptions())
         .withFaceLandmarks().withFaceDescriptors();
       if (ageGenderLoaded || expressionsLoaded) {
@@ -225,19 +285,15 @@
         }
         ctx.lineWidth = 2;
         ctx.strokeRect(box.x, box.y, box.width, box.height);
-        // 中文映射
         const genderMap = { male: '男', female: '女' };
         const exprMap = {
           angry: '愤怒', disgust: '厌恶', fearful: '恐惧', happy: '开心',
           neutral: '平静', sad: '悲伤', surprised: '惊讶'
         };
-        // label bg
         let label = isKnown ? best.toString() : '陌生人';
-        // 尝试附带年龄/性别信息
         const extraParts = [];
         if (typeof d.age === 'number') extraParts.push(Math.round(d.age) + '岁');
         if (typeof d.gender === 'string') extraParts.push(genderMap[d.gender] || d.gender);
-        // 表情信息（若模型可提供）
         if (d.expressions && typeof d.expressions === 'object') {
           let topExpr = null; let topProb = 0;
           for (const [expr, prob] of Object.entries(d.expressions)){
@@ -264,32 +320,28 @@
     status.textContent = '已停止';
   }
 
-  // Initialize
   let modelsReady = false;
   try {
     await loadModels();
     modelsReady = true;
   } catch (e) {
     console.warn('模型加载失败，无法开启实时识别：', e);
-    // 不阻塞其他功能，继续加载数据，但禁用识别按钮的提示
     ageGenderLoaded = false;
-    // 继续执行其余初始化
   }
-  loadKnownFaces();
+  
+  await loadKnownFaces();
   renderUploadedList();
+  
   status.textContent = modelsReady ? '模型已加载，就绪' : '模型加载失败';
-  // 禁用开启摄像头按钮，直到模型加载完成
   startBtn.disabled = !modelsReady;
+  showSyncStatus('已同步');
 
-  // 自动开启高级模型加载（默认开启）
   if(advEnabled){
     await loadAdvancedModelsFromPaths();
     status.textContent = (ageGenderLoaded || expressionsLoaded) ? '就绪（高级模型已加载）' : '就绪';
-    // 高级模型加载完成后也确保按钮可用
     startBtn.disabled = false;
   }
 
-  // Wire up UI
   dropArea.addEventListener('click', () => fileInput.click());
   fileInput.addEventListener('change', async (e) => {
     const f = e.target.files && e.target.files[0];
@@ -312,58 +364,20 @@
     if(!name){ alert('请为上传的人脸输入一个名称。'); return; }
     if(!lastSelectedDataURL){ alert('请先选择一张脸部图片上传。'); return; }
     await saveDescriptor(name, lastSelectedDataURL);
-    // reset partial state
     lastSelectedDataURL = null;
     preview.innerHTML = '';
     nameInput.value = '';
-    renderUploadedList();
   });
-
-  const loadingOverlay = document.getElementById('loadingOverlay');
-  const progressFill = document.getElementById('progressFill');
-  const loadingText = document.getElementById('loadingText');
-
-  function showLoading(message) {
-    loadingText.textContent = message;
-    progressFill.style.width = '0%';
-    loadingOverlay.style.display = 'flex';
-  }
-
-  function updateProgress(percent, message) {
-    progressFill.style.width = percent + '%';
-    if (message) loadingText.textContent = message;
-  }
-
-  function hideLoading() {
-    loadingOverlay.style.display = 'none';
-  }
 
   startBtn.addEventListener('click', async () => {
     if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){ alert('当前浏览器不支持摄像头'); return; }
     try {
-      showLoading('正在打开摄像头...');
-      updateProgress(10, '正在打开摄像头...');
       const stream = await navigator.mediaDevices.getUserMedia({ video: true });
       video.srcObject = stream; currentStream = stream;
       await video.play();
-      
-      if(advEnabled && (!ageGenderLoaded || !expressionsLoaded)){
-        updateProgress(30, '正在加载年龄识别模型...');
-        await loadAdvancedModelsFromPaths();
-      }
-      
-      updateProgress(80, '正在启动识别...');
       startBtn.disabled = true; stopBtn.disabled = false; status.textContent = '摄像头已开启，正在识别……';
-      
-      if(!faceMatcher || !faceMatcher.labeledDescriptors.length){
-        // Still run; user will be shown Unknown until faces added
-      }
-      
       await startRecognition();
-      updateProgress(100, '识别已启动');
-      setTimeout(hideLoading, 300);
     } catch (err) {
-      hideLoading();
       console.error(err); alert('无法打开摄像头，请检查浏览器权限。');
     }
   });
@@ -374,33 +388,26 @@
     startBtn.disabled = false; stopBtn.disabled = true;
   });
 
-  // 全屏功能 - 支持 iOS Safari
   const fullscreenBtn = document.getElementById('fullscreenBtn');
   const videoElem = document.getElementById('video');
   const overlayElem = document.getElementById('overlay');
-  const videoWrap = document.querySelector('.video-wrap');
   
-  // 检测是否是 iOS Safari
   const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
   const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
   let isInIOSFullscreen = false;
   
   function toggleFullscreen() {
-    // iOS Safari 使用 video.webkitEnterFullscreen
     if (isIOS || isSafari) {
       if (!videoElem.webkitDisplayingFullscreen) {
-        // 进入全屏
         videoElem.webkitEnterFullscreen();
         fullscreenBtn.textContent = '退出全屏';
       } else {
-        // 退出全屏
         videoElem.webkitExitFullscreen();
         fullscreenBtn.textContent = '全屏';
       }
       return;
     }
     
-    // 标准浏览器
     const videoContainer = document.querySelector('.video-wrap');
     if (!document.fullscreenElement && !document.webkitFullscreenElement) {
       if (videoContainer.requestFullscreen) {
@@ -420,24 +427,19 @@
   }
   fullscreenBtn.addEventListener('click', toggleFullscreen);
 
-  // iOS Safari 视频全屏变化监听
   videoElem.addEventListener('webkitbeginfullscreen', () => {
     fullscreenBtn.textContent = '退出全屏';
     isInIOSFullscreen = true;
-    // iOS 全屏时隐藏 overlay（因为不在同一层）
     overlayElem.style.display = 'none';
   });
   videoElem.addEventListener('webkitendfullscreen', () => {
     fullscreenBtn.textContent = '全屏';
     isInIOSFullscreen = false;
-    // 恢复 overlay
     overlayElem.style.display = 'block';
-    // 重新调整 canvas 大小
     overlayElem.width = videoElem.videoWidth;
     overlayElem.height = videoElem.videoHeight;
   });
   
-  // 标准全屏变化监听
   document.addEventListener('fullscreenchange', () => {
     fullscreenBtn.textContent = document.fullscreenElement ? '退出全屏' : '全屏';
   });
@@ -445,17 +447,7 @@
     fullscreenBtn.textContent = document.webkitFullscreenElement ? '退出全屏' : '全屏';
   });
 
-  // Advanced features (age/gender) - always enabled by default
-  const AGE_RECOGNITION_KEY = 'age_recognition_enabled';
-  const savedAgeEnabled = localStorage.getItem(AGE_RECOGNITION_KEY);
-  if (savedAgeEnabled !== null) {
-    advEnabled = savedAgeEnabled === 'true';
-  } else {
-    advEnabled = true;
-    localStorage.setItem(AGE_RECOGNITION_KEY, 'true');
-  }
-
- async function loadAdvancedModelsFromPaths(){
+  async function loadAdvancedModelsFromPaths(){
     const modelPaths = [
       'https://cdn.jsdelivr.net/npm/@vladmandic/face-api@1.7.5/model',
       'https://justadudewhohacks.github.io/face-api.js/models'

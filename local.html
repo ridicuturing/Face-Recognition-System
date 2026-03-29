@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>人脸识别 Demo（本地版）</title>
+  <link rel="stylesheet" href="styles.css" />
+  <style>
+    .header-bar {
+      background: #fff;
+      border-bottom: 1px solid #e5e7eb;
+      padding: 12px 20px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .header-bar h1 {
+      margin: 0;
+      font-size: 18px;
+      color: #111;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .header-bar .local-icon {
+      color: #10b981;
+    }
+    .back-btn {
+      background: #6b7280;
+      font-size: 13px;
+      padding: 6px 12px;
+    }
+    .back-btn:hover {
+      background: #4b5563;
+    }
+  </style>
+</head>
+<body>
+  <div class="header-bar">
+    <h1>
+      <svg class="local-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect>
+        <line x1="8" y1="21" x2="16" y2="21"></line>
+        <line x1="12" y1="17" x2="12" y2="21"></line>
+      </svg>
+      本地人脸识别
+    </h1>
+    <button class="back-btn" onclick="location.href='index.html'">返回首页</button>
+  </div>
+
+  <div class="container">
+    <!-- 上传区 -->
+    <section class="panel upload-panel">
+      <h2>上传人脸并命名</h2>
+      <div id="drop-area" class="drop-area">
+        将图片拖放到此处，或点击选择图片
+        <input id="fileInput" type="file" accept="image/*" />
+      </div>
+      <div class="form-row">
+        <input id="nameInput" placeholder="输入名称（如：张三）" />
+        <button id="addFaceBtn">保存脸部描述</button>
+      </div>
+      <div id="preview" class="preview"></div>
+      <div id="uploadedList" class="list"></div>
+    </section>
+
+    <!-- 摄像头区（实时识别） -->
+    <section class="panel cam-panel">
+      <div class="video-wrap">
+        <video id="video" autoplay muted playsinline></video>
+        <canvas id="overlay"></canvas>
+      </div>
+      <div class="controls" style="gap:8px; align-items:center; display:flex;">
+        <button id="startBtn">开启摄像头</button>
+        <button id="stopBtn" disabled>停止</button>
+        <button id="fullscreenBtn" class="small-btn" title="全屏显示">全屏</button>
+        <span id="status">尚未开启</span>
+      </div>
+      <div id="loadingOverlay" class="loading-overlay" style="display:none;">
+        <div class="loading-content">
+          <div class="progress-bar"><div id="progressFill" class="progress-fill"></div></div>
+          <p id="loadingText">正在加载模型...</p>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <!-- 依赖：@vladmandic/face-api（维护更好的分支，模型更全） -->
+  <script src="https://cdn.jsdelivr.net/npm/@vladmandic/face-api@1.7.5/dist/face-api.min.js"></script>
+  <script src="script.js"></script>
+</body>
+</html>

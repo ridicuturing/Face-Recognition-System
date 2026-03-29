@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>人脸识别 - 选择版本</title>
+  <link rel="stylesheet" href="styles.css" />
+  <style>
+    .login-container {
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+    .login-box {
+      background: #fff;
+      border-radius: 16px;
+      padding: 40px;
+      box-shadow: 0 10px 40px rgba(0,0,0,0.1);
+      width: 100%;
+      max-width: 400px;
+    }
+    .login-box h1 {
+      text-align: center;
+      margin: 0 0 30px;
+      color: #111;
+      font-size: 24px;
+    }
+    .login-box h2 {
+      text-align: center;
+      margin: 0 0 20px;
+      color: #111;
+      font-size: 18px;
+    }
+    .version-section {
+      margin-bottom: 30px;
+    }
+    .version-section:last-child {
+      margin-bottom: 0;
+    }
+    .version-btn {
+      width: 100%;
+      padding: 14px;
+      font-size: 15px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+    }
+    .version-btn.local {
+      background: #10b981;
+    }
+    .version-btn.local:hover {
+      background: #059669;
+    }
+    .version-btn.cloud {
+      background: #4f8aff;
+    }
+    .version-btn.cloud:hover {
+      background: #3b7cdd;
+    }
+    .divider {
+      text-align: center;
+      margin: 25px 0;
+      color: #9ca3af;
+      font-size: 13px;
+      position: relative;
+    }
+    .divider::before,
+    .divider::after {
+      content: '';
+      position: absolute;
+      top: 50%;
+      width: 40%;
+      height: 1px;
+      background: #e5e7eb;
+    }
+    .divider::before { left: 0; }
+    .divider::after { right: 0; }
+    .form-group {
+      margin-bottom: 16px;
+    }
+    .form-group label {
+      display: block;
+      margin-bottom: 6px;
+      font-size: 14px;
+      color: #374151;
+      font-weight: 500;
+    }
+    .form-group input {
+      width: 100%;
+      padding: 12px;
+      border: 1px solid #e5e7eb;
+      border-radius: 8px;
+      font-size: 14px;
+      transition: border-color 0.2s;
+    }
+    .form-group input:focus {
+      outline: none;
+      border-color: #4f8aff;
+    }
+    .login-btn {
+      width: 100%;
+      margin-top: 8px;
+    }
+    .error-msg {
+      color: #e53e3e;
+      font-size: 13px;
+      margin-top: 8px;
+      display: none;
+    }
+    .error-msg.show {
+      display: block;
+    }
+    .cloud-badge {
+      background: #fef3c7;
+      color: #92400e;
+      font-size: 11px;
+      padding: 2px 6px;
+      border-radius: 4px;
+    }
+  </style>
+</head>
+<body>
+  <div class="login-container">
+    <div class="login-box">
+      <h1>人脸识别系统</h1>
+      
+      <div class="version-section">
+        <button class="version-btn local" onclick="location.href='index.html'">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect>
+            <line x1="8" y1="21" x2="16" y2="21"></line>
+            <line x1="12" y1="17" x2="12" y2="21"></line>
+          </svg>
+          直接使用本地版本
+        </button>
+      </div>
+
+      <div class="divider">或</div>
+
+      <div class="version-section">
+        <h2>云端服务版 <span class="cloud-badge">需登录</span></h2>
+        <form id="cloudLoginForm">
+          <div class="form-group">
+            <label for="username">账号</label>
+            <input type="text" id="username" placeholder="请输入账号" required />
+          </div>
+          <div class="form-group">
+            <label for="password">密码</label>
+            <input type="password" id="password" placeholder="请输入密码" required />
+          </div>
+          <div class="error-msg" id="errorMsg">账号或密码错误</div>
+          <button type="submit" class="login-btn version-btn cloud">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"></path>
+            </svg>
+            登录云端版本
+          </button>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const CLOUD_USERS_KEY = 'cloud_users';
+    const CLOUD_SESSION_KEY = 'cloud_session';
+
+    function getUsers() {
+      const defaultUsers = [
+        { username: 'admin', password: 'admin123' },
+        { username: 'user', password: 'user123' }
+      ];
+      const stored = localStorage.getItem(CLOUD_USERS_KEY);
+      if (!stored) {
+        localStorage.setItem(CLOUD_USERS_KEY, JSON.stringify(defaultUsers));
+        return defaultUsers;
+      }
+      return JSON.parse(stored);
+    }
+
+    function login(username, password) {
+      const users = getUsers();
+      const user = users.find(u => u.username === username && u.password === password);
+      if (user) {
+        const session = {
+          username: user.username,
+          loginTime: new Date().toISOString()
+        };
+        localStorage.setItem(CLOUD_SESSION_KEY, JSON.stringify(session));
+        return true;
+      }
+      return false;
+    }
+
+    document.getElementById('cloudLoginForm').addEventListener('submit', function(e) {
+      e.preventDefault();
+      const username = document.getElementById('username').value.trim();
+      const password = document.getElementById('password').value;
+      const errorMsg = document.getElementById('errorMsg');
+
+      if (login(username, password)) {
+        location.href = 'cloud.html';
+      } else {
+        errorMsg.classList.add('show');
+        setTimeout(() => errorMsg.classList.remove('show'), 3000);
+      }
+    });
+  </script>
+</body>
+</html>
