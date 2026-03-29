@@ -13,10 +13,10 @@ const JWT_SECRET = 'face-recognition-secret-key-2024';
 // 中间件
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
-app.use(express.static(__dirname));
+app.use(express.static(path.join(__dirname, '../public')));
 
 // 数据库初始化
-const db = new Database('face Recognition.db');
+const db = new Database(path.join(__dirname, '../database/face Recognition.db'));
 
 // 创建表
 db.exec(`
@@ -178,15 +178,15 @@ app.post('/api/register', (req, res) => {
 
 // 静态文件服务
 app.get('/', (req, res) => {
-  res.sendFile(path.join(__dirname, 'index.html'));
+  res.sendFile(path.join(__dirname, '../public/index.html'));
 });
 
 app.get('/local', (req, res) => {
-  res.sendFile(path.join(__dirname, 'local.html'));
+  res.sendFile(path.join(__dirname, '../public/local.html'));
 });
 
 app.get('/cloud', (req, res) => {
-  res.sendFile(path.join(__dirname, 'cloud.html'));
+  res.sendFile(path.join(__dirname, '../public/cloud.html'));
 });
 
 // 启动服务器

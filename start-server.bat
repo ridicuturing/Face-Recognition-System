@@ -1,12 +1,11 @@
 @echo off
-echo 正在安装依赖...
+chcp 65001 >nul
+echo Installing dependencies...
 call npm install
 
 echo.
-echo 正在启动服务器...
-echo 服务器地址: http://localhost:3000
-echo.
+echo Starting server...
+echo Server address: http://localhost:8080
 
-node server.js
-
+node server/server.js
 pause
